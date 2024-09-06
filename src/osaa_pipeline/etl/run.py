@@ -1,98 +1,94 @@
-# imports
-import typer
+import os
+import ibis
+import logging
+from datetime import datetime
+from osaa_pipeline.utils import download_files_from_s3
+from osaa_pipeline.config import S3_BUCKET_NAME, LANDING_AREA_FOLDER
+from dotenv import load_dotenv
 
-from ibis_analytics.config import (
-    GH_PRS_TABLE,
-    GH_FORKS_TABLE,
-    GH_STARS_TABLE,
-    GH_ISSUES_TABLE,
-    GH_COMMITS_TABLE,
-    GH_WATCHERS_TABLE,
-    DOCS_TABLE,
-    ZULIP_MEMBERS_TABLE,
-    ZULIP_MESSAGES_TABLE,
-)
-from ibis_analytics.catalog import Catalog
-from ibis_analytics.etl.extract import (
-    gh_prs as extract_gh_prs,
-    gh_forks as extract_gh_forks,
-    gh_stars as extract_gh_stars,
-    gh_issues as extract_gh_issues,
-    gh_commits as extract_gh_commits,
-    gh_watchers as extract_gh_watchers,
-    docs as extract_docs,
-    zulip_members as extract_zulip_members,
-    zulip_messages as extract_zulip_messages,
-)
-from ibis_analytics.etl.transform import (
-    gh_prs as transform_gh_prs,
-    gh_forks as transform_gh_forks,
-    gh_stars as transform_gh_stars,
-    gh_issues as transform_gh_issues,
-    gh_commits as transform_gh_commits,
-    gh_watchers as transform_gh_watchers,
-    docs as transform_docs,
-    zulip_members as transform_zulip_members,
-    zulip_messages as transform_zulip_messages,
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+# Load environment variables from .env file if present
+load_dotenv()
+
+# Initialize S3 client
+import boto3
+s3_client = boto3.client(
+    's3',
+    aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+    aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+    region_name=os.getenv('AWS_REGION')
 )
 
+# Set extracted_at timestamp
+extracted_at = datetime.utcnow().isoformat()
 
-# functions
-def main(gh: bool, docs, zulip: bool):
-    # instantiate catalog
-    catalog = Catalog()
+# Utility functions
 
-    # extract
-    if gh:
-        typer.echo("Extracting GitHub data...")
-        extract_gh_prs_t = extract_gh_prs()
-        extract_gh_forks_t = extract_gh_forks()
-        extract_gh_stars_t = extract_gh_stars()
-        extract_gh_issues_t = extract_gh_issues()
-        extract_gh_commits_t = extract_gh_commits()
-        extract_gh_watchers_t = extract_gh_watchers()
+def add_extracted_at(t):
+    """
+    Add extracted_at column to the table to track extraction time.
+    """
+    t = t.mutate(extracted_at=ibis.literal(extracted_at)).relocate("extracted_at")
+    return t
 
-    if docs:
-        typer.echo("Extracting docs data...")
-        extract_docs_t = extract_docs()
+def constraints(t):
+    """
+    Ensure table is not empty by applying constraints.
+    """
+    assert t.count().to_pyarrow().as_py() > 0, "table is empty!"
+    return t
 
-    if zulip:
-        typer.echo("Extracting Zulip data...")
-        extract_zulip_members_t = extract_zulip_members()
-        extract_zulip_messages_t = extract_zulip_messages()
+# Main extraction functions for each data source
 
-    # transform
-    if gh:
-        typer.echo("Transforming GitHub data...")
-        transform_gh_prs_t = transform_gh_prs(extract_gh_prs_t)
-        transform_gh_forks_t = transform_gh_forks(extract_gh_forks_t)
-        transform_gh_stars_t = transform_gh_stars(extract_gh_stars_t)
-        transform_gh_issues_t = transform_gh_issues(extract_gh_issues_t)
-        transform_gh_commits_t = transform_gh_commits(extract_gh_commits_t)
-        transform_gh_watchers_t = transform_gh_watchers(extract_gh_watchers_t)
+def extract_source_data(source_folder):
+    """
+    Extracts data from the S3 landing folder for the given source folder.
+    
+    :param source_folder: The folder in the landing area to extract (e.g., 'wdi', 'edu').
+    :return: A Parquet table with the extracted data.
+    """
+    try:
+        # Download all files from the source folder in S3 to a local directory
+        local_dir = os.path.join('/tmp', source_folder)  # Use /tmp or another temp location
+        s3_folder = f'{LANDING_AREA_FOLDER}/{source_folder}'
+        download_files_from_s3(s3_client, S3_BUCKET_NAME, s3_folder, local_dir)
+        
+        # Convert all CSV files to Ibis tables and merge them
+        data_files = [os.path.join(local_dir, f) for f in os.listdir(local_dir) if f.endswith('.csv')]
+        tables = [ibis.read_csv(file) for file in data_files]
+        
+        # Combine all tables into one
+        combined_table = ibis.concat(tables)
+        
+        # Add 'extracted_at' timestamp column
+        combined_table = add_extracted_at(combined_table)
+        
+        # Apply constraints (check if the table is not empty)
+        combined_table = constraints(combined_table)
+        
+        # Write the final table to Parquet
+        parquet_output_path = os.path.join(local_dir, f'{source_folder}.parquet')
+        combined_table.to_parquet(parquet_output_path)
+        
+        logging.info(f'Successfully extracted and converted data for {source_folder} to Parquet.')
+        return combined_table
 
-    if docs:
-        typer.echo("Transforming docs data...")
-        transform_docs_t = transform_docs(extract_docs_t)
+    except Exception as e:
+        logging.error(f"Error extracting data from {source_folder}: {e}", exc_info=True)
+        return None
 
-    if zulip:
-        typer.echo("Transforming Zulip data...")
-        transform_zulip_members_t = transform_zulip_members(extract_zulip_members_t)
-        transform_zulip_messages_t = transform_zulip_messages(extract_zulip_messages_t)
+# Main function to extract all sources
+def extract_all_data():
+    """
+    Extracts all data from the landing folder in the S3 bucket, converts it to Parquet,
+    and adds the extracted_at timestamp.
+    """
+    sources = ['wdi', 'edu']  # Add more sources as needed
+    for source in sources:
+        logging.info(f"Extracting data from {source} folder...")
+        extract_source_data(source)
 
-    # load
-    if gh:
-        typer.echo("Loading GitHub data into datalake...")
-        catalog.write_table(transform_gh_prs_t, GH_PRS_TABLE)
-        catalog.write_table(transform_gh_forks_t, GH_FORKS_TABLE)
-        catalog.write_table(transform_gh_stars_t, GH_STARS_TABLE)
-        catalog.write_table(transform_gh_issues_t, GH_ISSUES_TABLE)
-        catalog.write_table(transform_gh_commits_t, GH_COMMITS_TABLE)
-        catalog.write_table(transform_gh_watchers_t, GH_WATCHERS_TABLE)
-    if docs:
-        typer.echo("Loading docs data into datalake...")
-        catalog.write_table(transform_docs_t, DOCS_TABLE)
-    if zulip:
-        typer.echo("Loading Zulip data into datalake...")
-        catalog.write_table(transform_zulip_members_t, ZULIP_MEMBERS_TABLE)
-        catalog.write_table(transform_zulip_messages_t, ZULIP_MESSAGES_TABLE)
+if __name__ == "__main__":
+    extract_all_data()

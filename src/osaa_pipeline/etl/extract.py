@@ -1,157 +1,70 @@
-# imports
-import os
 import ibis
+import logging
+import fsspec
+from datetime import datetime, timezone
+from osaa_pipeline.utils import s3_client_init, get_s3_file_paths
+from osaa_pipeline.config import S3_BUCKET_NAME, LANDING_AREA_FOLDER
 
-from datetime import datetime
-from ibis_analytics.config import (
-    DATA_DIR,
-    RAW_DATA_DIR,
-    RAW_DATA_GH_DIR,
-    RAW_DATA_DOCS_DIR,
-    RAW_DATA_ZULIP_DIR,
-)
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+# Init the s3 client
+s3_client = s3_client_init()
 
 # set extracted_at timestamp
-extracted_at = datetime.utcnow().isoformat()
+time_now = datetime.now(timezone.utc)
 
+class DataLoader:
+    def __init__(self, bucket_name=S3_BUCKET_NAME):
+        # Create an fsspec filesystem for S3
+        self.s3 = fsspec.filesystem('s3')
 
-# functions
-def add_extracted_at(t):
-    """Add extracted_at column to table."""
+        # Connect to DuckDB
+        self.con = ibis.duckdb.connect()
 
-    # add extracted_at column and relocate it to the first position
-    t = t.mutate(extracted_at=ibis.literal(extracted_at)).relocate("extracted_at")
+        # Register the S3 filesystem with DuckDB
+        self.con.register_filesystem(self.s3)
 
-    return t
+        # Get file paths from S3
+        self.file_paths = get_s3_file_paths(bucket_name, prefix='landing/')
 
+    @staticmethod
+    def add_extracted_at(t):
+        # Add an extracted_at column with the current timestamp
+        return t.mutate(extracted_at=ibis.literal(time_now)).relocate("extracted_at")
 
-def constraints(t):
-    """Check common constraints for extracted tables."""
+    def load_data(self):
+        """Extract data from all sources found in S3 landing folder."""
+        result = {}
+        for source, files in self.file_paths.items():
+            result[source] = {}
+            for name, path in files.items():
+                try:
+                    logging.info(f"Processing file: {source}/{name}")
+                    
+                    data = (
+                        self.con
+                        .read_parquet(path, table_name=f"{source}_{name}")
+                        .pipe(self.add_extracted_at)
+                    )
 
-    assert t.count().to_pyarrow().as_py() > 0, "table is empty!"
+                    result[source][name] = {
+                        "data": data,
+                        "description": f"Dataset: {source}, File: {name}",
+                        "source_path": path,
+                        "last_updated": time_now
+                    }
 
-    return t
+                    logging.info(f"Successfully processed file: {source}/{name}")
 
+                except Exception as e:
 
-# extract data assets
-def gh_commits():
-    """Extract GitHub commits data."""
+                    logging.error(f"Error processing file {source}/{name}: {str(e)}")
 
-    # read in raw data
-    data_glob = os.path.join(DATA_DIR, RAW_DATA_DIR, RAW_DATA_GH_DIR, "commits.*.json")
-    gh_commits = ibis.read_json(data_glob)
+                    result[source][name] = {
+                        "error": str(e),
+                        "source_path": path,
+                        "last_updated": time_now
+                    }
 
-    # add extracted_at column
-    gh_commits = gh_commits.pipe(add_extracted_at).pipe(constraints)
-
-    return gh_commits
-
-
-def gh_issues():
-    """Extract GitHub issues data."""
-
-    # read in raw data
-    data_glob = os.path.join(DATA_DIR, RAW_DATA_DIR, RAW_DATA_GH_DIR, "issues.*.json")
-    gh_issues = ibis.read_json(data_glob)
-
-    # add extracted_at column
-    gh_issues = gh_issues.pipe(add_extracted_at).pipe(constraints)
-
-    return gh_issues
-
-
-def gh_prs():
-    """Extract GitHub pull request (PR) data."""
-
-    # read in raw data
-    data_glob = os.path.join(
-        DATA_DIR, RAW_DATA_DIR, RAW_DATA_GH_DIR, "pullRequests.*.json"
-    )
-    gh_prs = ibis.read_json(data_glob)
-
-    # add extracted_at column
-    gh_prs = gh_prs.pipe(add_extracted_at).pipe(constraints)
-
-    return gh_prs
-
-
-def gh_forks():
-    """Extract GitHub forks data."""
-
-    # read in raw data
-    data_glob = os.path.join(DATA_DIR, RAW_DATA_DIR, RAW_DATA_GH_DIR, "forks.*.json")
-    gh_forks = ibis.read_json(data_glob)
-
-    # add extracted_at column
-    gh_forks = gh_forks.pipe(add_extracted_at).pipe(constraints)
-
-    return gh_forks
-
-
-def gh_stars():
-    """Extract GitHub stargazers data."""
-
-    # read in raw data
-    data_glob = os.path.join(
-        DATA_DIR, RAW_DATA_DIR, RAW_DATA_GH_DIR, "stargazers.*.json"
-    )
-    gh_stars = ibis.read_json(data_glob)
-
-    # add extracted_at column
-    gh_stars = gh_stars.pipe(add_extracted_at).pipe(constraints)
-
-    return gh_stars
-
-
-def gh_watchers():
-    """Extract GitHub watchers data."""
-
-    # read in raw data
-    data_glob = os.path.join(DATA_DIR, RAW_DATA_DIR, RAW_DATA_GH_DIR, "watchers.*.json")
-    gh_watchers = ibis.read_json(data_glob)
-
-    # add extracted_at column
-    gh_watchers = gh_watchers.pipe(add_extracted_at).pipe(constraints)
-
-    return gh_watchers
-
-
-def docs():
-    """Extract documentation data."""
-
-    # read in raw data
-    data_glob = os.path.join(DATA_DIR, RAW_DATA_DIR, RAW_DATA_DOCS_DIR, "*.csv.gz")
-    docs = ibis.read_csv(data_glob)
-
-    # add extracted_at column
-    docs = docs.pipe(add_extracted_at).pipe(constraints)
-
-    return docs
-
-
-def zulip_members():
-    """Extract Zulip members data."""
-
-    # read in raw data
-    data_glob = os.path.join(DATA_DIR, RAW_DATA_DIR, RAW_DATA_ZULIP_DIR, "members.json")
-    zulip_members = ibis.read_json(data_glob)
-
-    # add extracted_at column
-    zulip_members = zulip_members.pipe(add_extracted_at).pipe(constraints)
-
-    return zulip_members
-
-
-def zulip_messages():
-    """Extract Zulip messages data."""
-
-    # read in raw data
-    data_glob = os.path.join(
-        DATA_DIR, RAW_DATA_DIR, RAW_DATA_ZULIP_DIR, "messages.json"
-    )
-    zulip_messages = ibis.read_json(data_glob)
-
-    # add extracted_at column
-    zulip_messages = zulip_messages.pipe(add_extracted_at).pipe(constraints)
-
-    return zulip_messages
+        return result
