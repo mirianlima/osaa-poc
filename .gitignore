@@ -7,8 +7,9 @@
 sql_agent.ipynb
 explore.ipynb
 dev-requirements.txt
+.env
 
 # folders
 datalake/
 scratchpad/
-dashboard/
+dashboards/
