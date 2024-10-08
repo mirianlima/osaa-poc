@@ -1,0 +1,5 @@
+boto3==1.35.11
+duckdb==1.1.0
+ibis==3.3.0
+python-dotenv==1.0.1
+s3fs==2024.9.0

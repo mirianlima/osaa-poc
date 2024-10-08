@@ -1,0 +1,26 @@
+[project]
+name = "osaa-poc"
+version = "0.1.0"
+authors = [{ name = "Mirian Lima", email = "mirian.lima@un.org" }]
+description = "OSAA data pipeline Proof of Concept (PoC) using Ibis, DuckDB, and S3"
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "boto3==1.35.11",
+    "duckdb==1.1.0",
+    "ibis==3.3.0",
+    "python-dotenv==1.0.1",
+    "s3fs==2024.9.0"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/mirianlima/osaa-poc"
+"Bug Tracker" = "https://github.com/mirianlima/osaa-poc/issues"
+
+[tool.ruff]
+extend-include = ["*.ipynb"]

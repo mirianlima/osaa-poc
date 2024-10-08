@@ -1,0 +1,14 @@
+# OS generated files #
+.DS_Store
+.DS_Store?
+._*
+
+# Files
+sql_agent.ipynb
+explore.ipynb
+dev-requirements.txt
+
+# folders
+datalake/
+scratchpad/
+dashboard/
