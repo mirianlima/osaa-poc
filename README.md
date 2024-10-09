@@ -147,3 +147,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 Mirian Lima - mirian.lima@un.org
 
 Project Link: [https://github.com/mirianlima/osaa-poc](https://github.com/mirianlima/osaa-poc)
+
+## Acknowledgement
+
+This project was **heavily inspired by** the work of [Cody Peterson](https://github.com/lostmygithubaccount), specifically the [ibis-analytics](https://github.com/ibis-project/ibis-analytics) repository. While the initial direction and structure of the project were derived from Cody’s original work, significant modifications and expansions have been made to fit the needs and goals of this project, resulting in a codebase that diverges substantially from the original implementation.
