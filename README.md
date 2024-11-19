@@ -116,6 +116,10 @@ The raw data for this project is too large to be directly included in the GitHub
    
 Now your raw data is set up correctly, and you can proceed with running the pipeline as described below.
 
+The raw data is also available for bulk download:
+- World Bank [WDI catalog](https://datacatalog.worldbank.org/search/dataset/0037712). CSV zip download link [here](https://datacatalogfiles.worldbank.org/ddh-published/0037712/DR0045575/WDI_CSV_2024_10_24.zip?versionId=2024-10-28T13:09:29.1647687Z)
+- UNESCO Institute of Statistics (UIS) Education [data catalog](https://uis.unesco.org/bdds). CSV zip direct download links for [SDG](https://uis.unesco.org/sites/default/files/documents/bdds/092024/SDG.zip) and [OPRI](https://uis.unesco.org/sites/default/files/documents/bdds/092024/OPRI.zip)
+
 ### Running the Pipeline
 
 Use the `justfile` to run common tasks:
